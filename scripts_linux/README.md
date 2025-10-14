@@ -31,6 +31,17 @@ This folder contains bash scripts for Linux/Unix systems (including WSL on Windo
    ./run_pipeline.sh
    ```
 
+5. **Keep GPU alive (optional - for remote servers):**
+   ```bash
+   # Interactive mode (Ctrl+C to stop)
+   ./keep_gpu_alive.sh
+   
+   # Daemon mode (runs in background)
+   ./keep_gpu_alive_daemon.sh start
+   ./keep_gpu_alive_daemon.sh status
+   ./keep_gpu_alive_daemon.sh stop
+   ```
+
 ## Individual Scripts
 
 ### `setup.sh`
@@ -60,6 +71,18 @@ This folder contains bash scripts for Linux/Unix systems (including WSL on Windo
 - Shows PyTorch CUDA information
 - Displays NVIDIA driver status
 - Tests if the model configuration will use CUDA
+
+### `keep_gpu_alive.sh`
+- Keeps GPU active with dummy process to prevent machine shutdown
+- Useful for remote servers that kill inactive GPU processes
+- Minimal GPU usage (small tensor operations)
+- Shows GPU memory status every minute
+
+### `keep_gpu_alive_daemon.sh`
+- Runs GPU keep-alive as a background daemon process
+- Can be controlled with start/stop/restart/status commands
+- Logs activity to file
+- Perfect for long-running sessions
 
 ## Troubleshooting
 
