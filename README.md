@@ -8,10 +8,18 @@ Complete ASR transcription system using Qwen3-Omni with WER evaluation for the L
 
 ### Step 1: Complete Installation
 
-Run the all-in-one installer:
-
+**Windows:**
 ```batch
 install_all.bat
+```
+
+**Linux/macOS:**
+```bash
+cd scripts_linux
+chmod +x *.sh
+./setup.sh
+./update_transformers.sh
+cd ..
 ```
 
 This installs:
@@ -26,8 +34,16 @@ Time: ~10-15 minutes
 
 The model is ~75GB and may timeout. Use the download script with auto-resume:
 
+**Windows:**
 ```batch
 download_model.bat
+```
+
+**Linux/macOS:**
+```bash
+cd scripts_linux
+./download_model.sh
+cd ..
 ```
 
 **If download times out:** Just run again - it will resume automatically!
