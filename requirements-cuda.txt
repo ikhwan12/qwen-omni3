@@ -1,0 +1,10 @@
+# PyTorch with CUDA 12.1 support (for RTX 30xx/40xx GPUs)
+--index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Install PyTorch first, then install other dependencies:
+# pip install -r requirements-cuda.txt
+# pip install -r requirements.txt
+

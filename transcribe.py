@@ -1,0 +1,294 @@
+"""
+Transcription script using Qwen3-Omni model for L2-ARCTIC dataset
+"""
+import os
+import json
+import yaml
+import argparse
+from pathlib import Path
+from typing import Dict, List
+import torch
+try:
+    from transformers import Qwen3OmniMoeForConditionalGeneration, Qwen3OmniMoeProcessor
+    QWEN3_AVAILABLE = True
+except ImportError:
+    from transformers import AutoModel as Qwen3OmniMoeForConditionalGeneration
+    from transformers import AutoProcessor as Qwen3OmniMoeProcessor
+    QWEN3_AVAILABLE = False
+    print("Warning: Qwen3-Omni not available in transformers. Please run: update_transformers.bat")
+from tqdm import tqdm
+import soundfile as sf
+
+
+def load_config(config_path: str = "config.yaml") -> Dict:
+    """Load configuration from YAML file"""
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def setup_model(config: Dict):
+    """Initialize Qwen3-Omni model and processor"""
+    model_name = config['model']['name']
+    device = config['model']['device']
+    dtype_str = config['model']['torch_dtype']
+    
+    # Map dtype string to torch dtype
+    dtype_map = {
+        'bfloat16': torch.bfloat16,
+        'float16': torch.float16,
+        'float32': torch.float32
+    }
+    torch_dtype = dtype_map.get(dtype_str, torch.bfloat16)
+    
+    print(f"Loading model: {model_name}")
+    print(f"Device: {device}, Dtype: {dtype_str}")
+    
+    if not QWEN3_AVAILABLE:
+        print("\n" + "="*70)
+        print("ERROR: Qwen3-Omni models not available in current transformers!")
+        print("="*70)
+        print("\nPlease run: update_transformers.bat")
+        print("\nThis will install transformers from GitHub with Qwen3-Omni support.")
+        print("="*70)
+        raise ImportError("Qwen3-Omni not available. Run update_transformers.bat")
+    
+    processor = Qwen3OmniMoeProcessor.from_pretrained(
+        model_name,
+        trust_remote_code=True
+    )
+    
+    # Use Qwen3OmniMoeForConditionalGeneration for Qwen3-Omni-30B-A3B-Instruct
+    # Requires transformers from GitHub: pip install git+https://github.com/huggingface/transformers
+    model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
+        model_name,
+        torch_dtype=torch_dtype,
+        device_map=device,
+        trust_remote_code=True
+    )
+    
+    return model, processor
+
+
+def find_audio_files_l2arctic(data_dir: str, wav_subdir: str = "wav") -> List[Dict]:
+    """
+    Find all audio files in the L2-ARCTIC dataset
+    Structure: {speaker}/wav/arctic_aXXXX.wav
+    Returns list of dicts with audio_path and metadata
+    """
+    data_path = Path(data_dir)
+    audio_files = []
+    
+    # Get all speaker directories (exclude non-speaker folders)
+    speaker_dirs = [d for d in data_path.iterdir() 
+                   if d.is_dir() and not d.name.startswith('.') 
+                   and d.name not in ['l2arctic_audio']]
+    
+    print(f"Found {len(speaker_dirs)} speakers")
+    
+    for speaker_dir in speaker_dirs:
+        wav_dir = speaker_dir / wav_subdir
+        if not wav_dir.exists():
+            continue
+        
+        # Get all wav files for this speaker
+        for wav_file in sorted(wav_dir.glob("*.wav")):
+            audio_files.append({
+                'audio_path': str(wav_file),
+                'relative_path': str(wav_file.relative_to(data_path)),
+                'speaker': speaker_dir.name,
+                'filename': wav_file.stem
+            })
+    
+    print(f"Found {len(audio_files)} audio files across all speakers")
+    return audio_files
+
+
+def transcribe_audio(audio_path: str, model, processor, config: Dict) -> str:
+    """Transcribe a single audio file"""
+    language = config['dataset']['language']
+    
+    # Select appropriate prompt based on official Qwen3-Omni documentation
+    # https://huggingface.co/Qwen/Qwen3-Omni-30B-A3B-Instruct
+    if language.lower() == 'chinese':
+        prompt = "请将这段中文语音转换为纯文本。"
+    else:
+        prompt = "Transcribe the audio into text."
+    
+    # Prepare message in Qwen3-Omni format (audio first, then text)
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "audio", "audio": audio_path},
+                {"type": "text", "text": prompt}
+            ]
+        }
+    ]
+    
+    # Process messages
+    text = processor.apply_chat_template(
+        messages, 
+        tokenize=False, 
+        add_generation_prompt=True
+    )
+    
+    audios = []
+    for message in messages:
+        if isinstance(message["content"], list):
+            for ele in message["content"]:
+                if ele["type"] == "audio":
+                    audios.append(ele["audio"])
+    
+    # Prepare inputs
+    inputs = processor(
+        text=[text],
+        audios=audios,
+        return_tensors="pt",
+        padding=True
+    )
+    
+    # Move to device
+    device = config['model']['device']
+    inputs = inputs.to(device)
+    
+    # Generate transcription
+    with torch.no_grad():
+        generated_ids = model.generate(
+            **inputs,
+            max_new_tokens=256
+        )
+    
+    # Trim input tokens
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    
+    # Decode output
+    output_text = processor.batch_decode(
+        generated_ids_trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
+    )
+    
+    return output_text[0].strip()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Transcribe audio using Qwen3-Omni")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Path to configuration file"
+    )
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help="Override dataset directory from config"
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Override output directory from config"
+    )
+    parser.add_argument(
+        "--speaker",
+        type=str,
+        default=None,
+        help="Process only specific speaker (e.g., ABA, ASI)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
+    
+    # Override with command line arguments if provided
+    if args.data_dir:
+        config['dataset']['data_dir'] = args.data_dir
+    if args.output_dir:
+        config['dataset']['output_dir'] = args.output_dir
+    
+    # Create output directory
+    output_dir = Path(config['dataset']['output_dir'])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup model
+    print("Setting up model...")
+    model, processor = setup_model(config)
+    
+    # Find audio files
+    print(f"\nSearching for audio files in: {config['dataset']['data_dir']}")
+    wav_subdir = config['dataset'].get('wav_subdir', 'wav')
+    audio_files = find_audio_files_l2arctic(config['dataset']['data_dir'], wav_subdir)
+    
+    # Filter by speaker if specified
+    if args.speaker:
+        audio_files = [af for af in audio_files if af['speaker'] == args.speaker]
+        print(f"Filtering for speaker: {args.speaker} ({len(audio_files)} files)")
+    
+    if not audio_files:
+        print("No audio files found! Please check the data_dir path.")
+        return
+    
+    # Transcribe all audio files
+    results = []
+    print(f"\nTranscribing {len(audio_files)} audio files...")
+    
+    for audio_info in tqdm(audio_files, desc="Transcribing"):
+        try:
+            transcription = transcribe_audio(
+                audio_info['audio_path'],
+                model,
+                processor,
+                config
+            )
+            
+            result = {
+                'audio_path': audio_info['audio_path'],
+                'relative_path': audio_info['relative_path'],
+                'speaker': audio_info['speaker'],
+                'filename': audio_info['filename'],
+                'transcription': transcription
+            }
+            results.append(result)
+            
+        except Exception as e:
+            print(f"\nError processing {audio_info['audio_path']}: {str(e)}")
+            results.append({
+                'audio_path': audio_info['audio_path'],
+                'relative_path': audio_info['relative_path'],
+                'speaker': audio_info['speaker'],
+                'filename': audio_info['filename'],
+                'transcription': '',
+                'error': str(e)
+            })
+    
+    # Save results
+    output_file = output_dir / "transcriptions.json"
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    
+    print(f"\nTranscriptions saved to: {output_file}")
+    print(f"Successfully transcribed: {sum(1 for r in results if 'error' not in r)} / {len(results)} files")
+    
+    # Save per-speaker summary
+    speakers = {}
+    for r in results:
+        speaker = r['speaker']
+        if speaker not in speakers:
+            speakers[speaker] = {'total': 0, 'success': 0}
+        speakers[speaker]['total'] += 1
+        if 'error' not in r:
+            speakers[speaker]['success'] += 1
+    
+    print("\nPer-speaker summary:")
+    for speaker, stats in sorted(speakers.items()):
+        print(f"  {speaker}: {stats['success']}/{stats['total']} files")
+
+
+if __name__ == "__main__":
+    main()

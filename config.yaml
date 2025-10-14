@@ -1,0 +1,45 @@
+# Configuration for Qwen3-Omni Transcription and WER Evaluation
+
+# Model Configuration
+model:
+  # Model name from Hugging Face or local path
+  # For ASR transcription, use Instruct models (NOT Captioner!)
+  # Captioner is only for audio description, not speech transcription
+  # Options: "Qwen/Qwen3-Omni-30B-A3B-Instruct" or "Qwen/Qwen2.5-Omni-7B-Instruct"
+  name: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+  device: "cuda"  # Options: "cuda", "cpu" (use "cuda" for GPU, "cpu" for CPU-only)
+  torch_dtype: "bfloat16"  # Options: "bfloat16", "float16", "float32"
+  # Note: Run 'python scripts/check_cuda.py' to verify CUDA is available
+  # WARNING: Qwen3-Omni-30B requires 48GB+ VRAM (you have Quadro RTX 8000 48GB ✓)
+
+# Dataset Configuration
+dataset:
+  # Path to L2-ARCTIC dataset
+  data_dir: "E:/Dataset/LNV/L2-ARCTIC/l2arctic_release_v5.0"
+  # Output directory for transcriptions
+  output_dir: "./outputs"
+  # Language for transcription
+  language: "english"  # Options: "english", "chinese", etc.
+  # Dataset structure for L2-ARCTIC v5.0
+  wav_subdir: "wav"  # Subdirectory containing wav files
+  transcript_subdir: "transcript"  # Subdirectory containing transcript files
+  
+# Transcription Configuration
+transcription:
+  # Prompts are now hardcoded in transcribe.py based on official Qwen3-Omni docs
+  # English: "Transcribe the audio into text."
+  # Chinese: "请将这段中文语音转换为纯文本。"
+  # Batch size for processing
+  batch_size: 1
+  # Audio preprocessing
+  target_sample_rate: 16000
+
+# Evaluation Configuration
+evaluation:
+  # Whether to normalize text before WER calculation
+  normalize_text: true
+  # Whether to remove punctuation
+  remove_punctuation: true
+  # Whether to convert to lowercase
+  lowercase: true
+
