@@ -28,6 +28,7 @@ import soundfile as sf
 import librosa
 import scipy.io.wavfile
 import numpy as np
+from qwen_omni_utils import process_mm_info
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -228,15 +229,14 @@ def manual_audio_processing(audio_path: str, processor, debug: bool = False):
     return audio_tensor
 
 
-def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: bool = False) -> str:
-    """Transcribe a single audio file"""
+def transcribe_audio_official_method(audio_path: str, model, processor, config: Dict, debug: bool = False) -> str:
+    """Transcribe audio using the official Qwen3-Omni demo approach"""
     if debug:
-        print(f"  Processing: {audio_path}")
+        print(f"  Processing with official method: {audio_path}")
     
     language = config['dataset']['language']
     
     # Select appropriate prompt based on official Qwen3-Omni documentation
-    # https://huggingface.co/Qwen/Qwen3-Omni-30B-A3B-Instruct
     if language.lower() == 'chinese':
         prompt = "请将这段中文语音转换为纯文本。"
     else:
@@ -245,102 +245,108 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
     if debug:
         print(f"    Language: {language}, Prompt: {prompt}")
     
-    # Validate and load audio first to catch issues early
-    try:
-        audio_data, sample_rate = validate_and_load_audio(audio_path, debug)
-    except Exception as e:
-        if debug:
-            print(f"    Audio validation failed: {str(e)}")
-        raise
+    # Validate audio file exists
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
     
-    # Try Approach 3: Manual audio processing to completely bypass processor audio loading
     try:
-        if debug:
-            print(f"    Trying approach 3: manual audio processing")
-        
-        # Manually process the audio
-        audio_tensor = manual_audio_processing(audio_path, processor, debug)
-        
-        # Create text input manually (without audio in the messages)
-        # This bypasses the problematic audio processing in the processor
-        # Use a more specific prompt that indicates we're doing audio transcription
-        transcription_prompt = f"I have an audio file that needs to be transcribed. {prompt} Please provide the transcription:"
-        
-        text_messages = [
+        # Create messages in the official format
+        messages = [
             {
-                "role": "user", 
-                "content": transcription_prompt
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": audio_path},
+                    {"type": "text", "text": prompt}
+                ]
             }
         ]
         
-        # Apply chat template for text only
-        text_input = processor.apply_chat_template(
-            text_messages, 
-            tokenize=False, 
-            add_generation_prompt=True
+        if debug:
+            print(f"    Messages formatted successfully")
+        
+        # Apply chat template (official method)
+        text = processor.apply_chat_template(
+            messages, 
+            add_generation_prompt=True, 
+            tokenize=False
         )
         
         if debug:
-            print(f"    Text template applied successfully")
+            print(f"    Chat template applied successfully")
         
-        # Manually create inputs by bypassing the problematic processor.__call__
-        # We'll tokenize the text and handle audio separately
-        tokenizer = processor.tokenizer
+        # Process multimodal info using official utility
+        audios, images, videos = process_mm_info(messages, use_audio_in_video=True)
         
-        # Tokenize text
-        text_inputs = tokenizer(
-            text_input,
-            return_tensors="pt",
-            padding=True
+        if debug:
+            print(f"    Multimodal info processed: audios={audios is not None}, images={images is not None}, videos={videos is not None}")
+        
+        # Create inputs using official method
+        inputs = processor(
+            text=text, 
+            audio=audios, 
+            images=images, 
+            videos=videos, 
+            return_tensors="pt", 
+            padding=True, 
+            use_audio_in_video=True
         )
         
-        if debug:
-            print(f"    Text tokenized successfully")
-        
-        # For Qwen3-Omni, we need to handle audio features manually
-        # This is a simplified approach that bypasses the buggy processor method
-        inputs = {
-            'input_ids': text_inputs['input_ids'],
-            'attention_mask': text_inputs['attention_mask'],
-        }
-        
-        # Try to add audio features if the model expects them
-        # Note: This is a simplified approach - the model might need audio in a specific format
-        if hasattr(processor, 'audio_processor') and processor.audio_processor is not None:
-            try:
-                # Process audio with the audio processor
-                audio_features = processor.audio_processor(
-                    audio_tensor, 
-                    sampling_rate=16000,
-                    return_tensors="pt"
-                )
-                # Add audio features to inputs if they exist
-                if hasattr(audio_features, 'input_features'):
-                    inputs['audio_features'] = audio_features.input_features
-                elif hasattr(audio_features, 'audio_features'):
-                    inputs['audio_features'] = audio_features.audio_features
-                elif isinstance(audio_features, dict):
-                    inputs.update(audio_features)
-                    
-                if debug:
-                    print(f"    Audio features processed successfully")
-            except Exception as audio_e:
-                if debug:
-                    print(f"    Audio processing failed, continuing with text-only: {str(audio_e)}")
+        # Move to device as in official demo
+        inputs = inputs.to(model.device).to(model.dtype)
         
         if debug:
-            print(f"    Approach 3 input preparation successful")
+            print(f"    Inputs prepared successfully")
+            print(f"    Input keys: {list(inputs.keys())}")
+            print(f"    Moved to device: {model.device}, dtype: {model.dtype}")
+            for key, value in inputs.items():
+                if hasattr(value, 'shape'):
+                    print(f"    {key} shape: {value.shape}")
+                    print(f"    {key} device: {value.device if hasattr(value, 'device') else 'N/A'}")
+        
+        return inputs, text
+        
+    except Exception as e:
+        if debug:
+            print(f"    Official method failed: {str(e)}")
+        raise e
+
+
+def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: bool = False) -> str:
+    """Transcribe a single audio file using official Qwen3-Omni approach"""
+    if debug:
+        print(f"  Processing: {audio_path}")
+    
+    language = config['dataset']['language']
+    
+    # Select appropriate prompt based on official Qwen3-Omni documentation
+    if language.lower() == 'chinese':
+        prompt = "请将这段中文语音转换为纯文本。"
+    else:
+        prompt = "Transcribe the audio into text."
+    
+    if debug:
+        print(f"    Language: {language}, Prompt: {prompt}")
+    
+    # Try the official method first
+    try:
+        if debug:
+            print(f"    Trying official Qwen3-Omni method")
+        
+        inputs, original_text = transcribe_audio_official_method(audio_path, model, processor, config, debug)
+        
+        if debug:
+            print(f"    Official method successful - proceeding with generation")
             
-    except Exception as e3:
+    except Exception as e1:
         if debug:
-            print(f"    Approach 3 failed: {str(e3)}")
+            print(f"    Official method failed: {str(e1)}")
         
-        # Fallback: Try the simple text-only approach
+        # Fallback to text-only approach
         try:
             if debug:
-                print(f"    Trying fallback approach: text-only processing")
+                print(f"    Trying fallback text-only approach")
             
-            # Simple text-only processing as last resort
+            # Simple text-only processing as fallback
             text_messages = [{"role": "user", "content": prompt}]
             text_input = processor.apply_chat_template(
                 text_messages, 
@@ -361,74 +367,94 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         except Exception as e_final:
             if debug:
                 print(f"    All approaches failed: {str(e_final)}")
-            raise Exception(f"All transcription approaches failed. Original error: {str(e3)}, Fallback error: {str(e_final)}")
+            raise Exception(f"All transcription approaches failed. Official error: {str(e1)}, Fallback error: {str(e_final)}")
     
-    # Move to device
-    device = config['model']['device']
-    try:
-        # Move all tensor inputs to device
-        for key, value in inputs.items():
-            if torch.is_tensor(value):
-                inputs[key] = value.to(device)
-        
+    # Note: Inputs are already moved to device in official method
+    # Skip device movement for official method, do it for fallback only
+    if not hasattr(inputs, 'input_ids') or inputs.get('input_ids') is None or inputs['input_ids'].device.type == 'cpu':
+        # This is likely the fallback method, so move to device manually
+        device = config['model']['device']
+        try:
+            # Move all tensor inputs to device
+            for key, value in inputs.items():
+                if torch.is_tensor(value):
+                    inputs[key] = value.to(device)
+            
+            if debug:
+                print(f"    Fallback inputs moved to device: {device}")
+        except Exception as e:
+            if debug:
+                print(f"    Failed to move inputs to device: {str(e)}")
+            raise
+    else:
         if debug:
-            print(f"    Inputs moved to device: {device}")
-    except Exception as e:
-        if debug:
-            print(f"    Failed to move inputs to device: {str(e)}")
-        raise
+            print(f"    Inputs already on device (official method)")
     
-    # Generate transcription
+    # Generate transcription using official Qwen3-Omni parameters
     try:
         with torch.no_grad():
             if debug:
-                print(f"    Starting model generation...")
+                print(f"    Starting model generation with official parameters...")
             
-            # Try generation with the prepared inputs
-            generated_ids = model.generate(
+            # Use official Qwen3-Omni generation parameters
+            generated_result = model.generate(
                 **inputs,
-                max_new_tokens=256,
-                do_sample=False,  # Use deterministic generation
-                pad_token_id=processor.tokenizer.eos_token_id
+                thinker_return_dict_in_generate=True,
+                thinker_max_new_tokens=32768,
+                thinker_do_sample=True,
+                thinker_temperature=0.7,
+                thinker_top_p=0.8,
+                thinker_top_k=20,
+                use_audio_in_video=True
             )
             
             if debug:
                 print(f"    Model generation completed")
-                # Handle case where model.generate() returns a tuple
-                if isinstance(generated_ids, tuple):
-                    generated_ids = generated_ids[0]
-                    if debug:
-                        print(f"    Extracted tensor from tuple")
-                print(f"    Generated IDs shape: {generated_ids.shape}")
-                print(f"    Generated IDs type: {type(generated_ids)}")
+                print(f"    Generated result type: {type(generated_result)}")
                 
+            # Handle different return formats from official method
+            if isinstance(generated_result, tuple) and len(generated_result) >= 2:
+                # Official method returns (text_ids, audio) tuple
+                generated_ids, audio = generated_result[0], generated_result[1]
+                if debug:
+                    print(f"    Extracted text_ids and audio from tuple")
+                    print(f"    Text IDs type: {type(generated_ids)}")
+                    print(f"    Audio result: {audio is not None}")
+            elif hasattr(generated_result, 'sequences'):
+                # Result is a generation output object
+                generated_ids = generated_result.sequences
+                audio = None
+                if debug:
+                    print(f"    Extracted sequences from generation output")
+            else:
+                # Simple tensor result
+                generated_ids = generated_result
+                audio = None
+                if debug:
+                    print(f"    Using direct tensor result")
+            
+            if hasattr(generated_ids, 'shape'):
+                if debug:
+                    print(f"    Generated IDs shape: {generated_ids.shape}")
+            
     except Exception as e:
         if debug:
-            print(f"    Failed during model generation: {str(e)}")
-            # Try a simpler generation approach
+            print(f"    Official generation failed: {str(e)}")
             print(f"    Trying simplified generation...")
         
         try:
-            # Fallback: Try with just input_ids and attention_mask
-            basic_inputs = {
-                'input_ids': inputs['input_ids'],
-                'attention_mask': inputs.get('attention_mask', None)
-            }
-            
-            # Remove None values
-            basic_inputs = {k: v for k, v in basic_inputs.items() if v is not None}
-            
+            # Fallback: Try simpler generation parameters
             with torch.no_grad():
                 generated_ids = model.generate(
-                    **basic_inputs,
-                    max_new_tokens=128,  # Shorter for fallback
+                    **inputs,
+                    max_new_tokens=512,
                     do_sample=False,
                     pad_token_id=processor.tokenizer.eos_token_id
                 )
             
             if debug:
                 print(f"    Simplified generation successful")
-                # Handle tuple case for simplified generation too
+                # Handle tuple case for simplified generation
                 if isinstance(generated_ids, tuple):
                     generated_ids = generated_ids[0]
                     if debug:
@@ -438,9 +464,31 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         except Exception as e2:
             if debug:
                 print(f"    Simplified generation also failed: {str(e2)}")
-            raise Exception(f"Model generation failed: {str(e)}")
+            
+            # Last resort: Try with minimal inputs
+            try:
+                basic_inputs = {
+                    'input_ids': inputs['input_ids'],
+                    'attention_mask': inputs.get('attention_mask', None)
+                }
+                basic_inputs = {k: v for k, v in basic_inputs.items() if v is not None}
+                
+                with torch.no_grad():
+                    generated_ids = model.generate(
+                        **basic_inputs,
+                        max_new_tokens=128,
+                        do_sample=False
+                    )
+                
+                if debug:
+                    print(f"    Minimal generation successful")
+                
+            except Exception as e3:
+                if debug:
+                    print(f"    All generation approaches failed: {str(e3)}")
+                raise Exception(f"Model generation failed: Original: {str(e)}, Simplified: {str(e2)}, Minimal: {str(e3)}")
     
-    # Trim input tokens
+    # Decode output using official Qwen3-Omni method
     try:
         if 'input_ids' in inputs:
             input_length = inputs['input_ids'].shape[1]
@@ -451,82 +499,74 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
             print(f"    Input length to trim: {input_length}")
             print(f"    Generated IDs shape before trimming: {generated_ids.shape}")
         
-        # Trim the input tokens from generated output
-        if input_length > 0 and generated_ids.shape[1] > input_length:
-            generated_ids_trimmed = generated_ids[:, input_length:]
-            if debug:
-                print(f"    Trimmed {input_length} input tokens")
-                print(f"    Generated IDs shape after trimming: {generated_ids_trimmed.shape}")
+        # Use official decoding method: processor.batch_decode(text_ids.sequences[:, inputs["input_ids"].shape[1] :], ...)
+        if hasattr(generated_ids, 'sequences'):
+            # If it's a generation output object, use sequences attribute
+            sequences_to_decode = generated_ids.sequences[:, input_length:]
         else:
-            generated_ids_trimmed = generated_ids
-            if debug:
-                print(f"    No trimming needed or safe to do")
-            
-    except Exception as e:
-        if debug:
-            print(f"    Token trimming failed, using full output: {str(e)}")
-        generated_ids_trimmed = generated_ids
-    
-    # Decode output
-    try:
-        if hasattr(processor, 'batch_decode'):
-            decoder = processor.batch_decode
-        else:
-            decoder = processor.tokenizer.batch_decode
+            # If it's already a tensor, use it directly
+            sequences_to_decode = generated_ids[:, input_length:]
         
         if debug:
-            print(f"    Decoding with shape: {generated_ids_trimmed.shape}")
+            print(f"    Sequences to decode shape: {sequences_to_decode.shape}")
             # Show some token IDs for debugging
-            if generated_ids_trimmed.shape[1] > 0:
-                sample_tokens = generated_ids_trimmed[0][:min(10, generated_ids_trimmed.shape[1])]
+            if sequences_to_decode.shape[1] > 0:
+                sample_tokens = sequences_to_decode[0][:min(10, sequences_to_decode.shape[1])]
                 print(f"    Sample token IDs: {sample_tokens.tolist()}")
-            
-        output_text = decoder(
-            generated_ids_trimmed,
+        
+        # Use processor.batch_decode as in official demo
+        response = processor.batch_decode(
+            sequences_to_decode,
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False
-        )
+        )[0]
         
         if debug:
-            print(f"    Decoded output: {len(output_text)} items")
-            for i, text in enumerate(output_text):
-                print(f"    Output {i}: '{text}'")
-            
-        # Return the first result, handling empty results
-        if output_text and len(output_text) > 0:
-            result = output_text[0].strip()
+            print(f"    Decoded response length: {len(response)}")
+            if response.strip():
+                print(f"    Decoded response: '{response[:200]}{'...' if len(response) > 200 else ''}'")
+            else:
+                print(f"    Decoded response is empty")
+        
+        # Clean up and return the result
+        result = response.strip()
+        
+        if result:
             if debug:
-                print(f"    Final result length: {len(result)}")
-                if len(result) > 0:
-                    print(f"    Final result: '{result[:200]}{'...' if len(result) > 200 else ''}'")
-                else:
-                    print(f"    Final result is empty - trying alternative decoding")
-                    
-                    # Try decoding the full generated sequence if trimmed version is empty
-                    if generated_ids.shape[1] > 0:
-                        full_output = decoder(
-                            generated_ids,
-                            skip_special_tokens=True,
-                            clean_up_tokenization_spaces=False
-                        )
-                        if debug:
-                            print(f"    Full output (untrimmed): '{full_output[0]}'")
-                        
-                        # If full output has content, use it
-                        if full_output and full_output[0].strip():
-                            result = full_output[0].strip()
-                            if debug:
-                                print(f"    Using full output: '{result[:200]}{'...' if len(result) > 200 else ''}'")
-            
-            return result if result else "No transcription generated"
+                print(f"    ✅ Successful transcription: '{result[:100]}{'...' if len(result) > 100 else ''}'")
+            return result
         else:
             if debug:
-                print(f"    No output text generated")
-            return "No output from decoder"
+                print(f"    ⚠️  Empty transcription result")
+                
+                # Try decoding the full sequence as fallback
+                try:
+                    full_sequences = generated_ids if not hasattr(generated_ids, 'sequences') else generated_ids.sequences
+                    full_response = processor.batch_decode(
+                        full_sequences,
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=False
+                    )[0].strip()
+                    
+                    if full_response:
+                        if debug:
+                            print(f"    Using full sequence decode: '{full_response[:100]}{'...' if len(full_response) > 100 else ''}'")
+                        return full_response
+                    else:
+                        if debug:
+                            print(f"    Full sequence decode also empty")
+                
+                except Exception as fallback_e:
+                    if debug:
+                        print(f"    Full sequence decode failed: {str(fallback_e)}")
+            
+            return "No transcription generated"
             
     except Exception as e:
         if debug:
             print(f"    Decoding failed: {str(e)}")
+            import traceback
+            print(f"    Traceback:\n{traceback.format_exc()}")
         raise Exception(f"Output decoding failed: {str(e)}")
 
 
