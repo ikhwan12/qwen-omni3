@@ -1,0 +1,42 @@
+# Configuration for Qwen3-Omni Transcription (NO QUANTIZATION)
+# Use this config to test if quantization is causing issues
+
+# Model Configuration
+model:
+  # Model name from Hugging Face or local path
+  name: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+  device: "cuda"  # Options: "cuda", "cpu"
+  torch_dtype: "bfloat16"  # Options: "bfloat16", "float16", "float32"
+  # Quantization DISABLED for testing
+  quantization:
+    enabled: false
+    load_in_4bit: false
+    load_in_8bit: false
+
+# Dataset Configuration
+dataset:
+  # Path to L2-ARCTIC dataset
+  data_dir: "datasets"
+  # Output directory for transcriptions
+  output_dir: "./outputs"
+  # Language for transcription
+  language: "english"  # Options: "english", "chinese", etc.
+  # Dataset structure for L2-ARCTIC v5.0
+  wav_subdir: "wav"  # Subdirectory containing wav files
+  transcript_subdir: "transcript"  # Subdirectory containing transcript files
+  
+# Transcription Configuration
+transcription:
+  # Batch size for processing
+  batch_size: 1
+  # Audio preprocessing
+  target_sample_rate: 16000
+
+# Evaluation Configuration
+evaluation:
+  # Whether to normalize text before WER calculation
+  normalize_text: true
+  # Whether to remove punctuation
+  remove_punctuation: true
+  # Whether to convert to lowercase
+  lowercase: true
