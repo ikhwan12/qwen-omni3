@@ -155,8 +155,11 @@ def find_audio_files_l2arctic(data_dir: str, wav_subdir: str = "wav") -> List[Di
     return audio_files
 
 
-def transcribe_audio(audio_path: str, model, processor, config: Dict) -> str:
+def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: bool = False) -> str:
     """Transcribe a single audio file"""
+    if debug:
+        print(f"  Processing: {audio_path}")
+    
     language = config['dataset']['language']
     
     # Select appropriate prompt based on official Qwen3-Omni documentation
@@ -165,6 +168,16 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict) -> str:
         prompt = "请将这段中文语音转换为纯文本。"
     else:
         prompt = "Transcribe the audio into text."
+    
+    if debug:
+        print(f"    Language: {language}, Prompt: {prompt}")
+        
+    # Check if audio file exists and is readable
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    
+    if debug:
+        print(f"    Audio file exists: {os.path.getsize(audio_path)} bytes")
     
     # Prepare message in Qwen3-Omni format (audio first, then text)
     messages = [
@@ -177,12 +190,22 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict) -> str:
         }
     ]
     
+    if debug:
+        print(f"    Prepared messages with audio and text")
+    
     # Process messages
-    text = processor.apply_chat_template(
-        messages, 
-        tokenize=False, 
-        add_generation_prompt=True
-    )
+    try:
+        text = processor.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
+        )
+        if debug:
+            print(f"    Applied chat template successfully")
+    except Exception as e:
+        if debug:
+            print(f"    Failed to apply chat template: {str(e)}")
+        raise
     
     audios = []
     for message in messages:
@@ -191,24 +214,50 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict) -> str:
                 if ele["type"] == "audio":
                     audios.append(ele["audio"])
     
+    if debug:
+        print(f"    Found {len(audios)} audio files to process")
+    
     # Prepare inputs
-    inputs = processor(
-        text=[text],
-        audios=audios,
-        return_tensors="pt",
-        padding=True
-    )
+    try:
+        inputs = processor(
+            text=[text],
+            audios=audios,
+            return_tensors="pt",
+            padding=True
+        )
+        if debug:
+            print(f"    Processor inputs prepared successfully")
+    except Exception as e:
+        if debug:
+            print(f"    Failed to prepare inputs: {str(e)}")
+        raise
     
     # Move to device
     device = config['model']['device']
-    inputs = inputs.to(device)
+    try:
+        inputs = inputs.to(device)
+        if debug:
+            print(f"    Inputs moved to device: {device}")
+    except Exception as e:
+        if debug:
+            print(f"    Failed to move inputs to device: {str(e)}")
+        raise
     
     # Generate transcription
-    with torch.no_grad():
-        generated_ids = model.generate(
-            **inputs,
-            max_new_tokens=256
-        )
+    try:
+        with torch.no_grad():
+            if debug:
+                print(f"    Starting model generation...")
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=256
+            )
+            if debug:
+                print(f"    Model generation completed")
+    except Exception as e:
+        if debug:
+            print(f"    Failed during model generation: {str(e)}")
+        raise
     
     # Trim input tokens
     generated_ids_trimmed = [
@@ -251,6 +300,17 @@ def main():
         default=None,
         help="Process only specific speaker (e.g., ABA, ASI)"
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with verbose output"
+    )
+    parser.add_argument(
+        "--test_single",
+        type=str,
+        default=None,
+        help="Test transcription on a single audio file first"
+    )
     
     args = parser.parse_args()
     
@@ -267,9 +327,21 @@ def main():
     output_dir = Path(config['dataset']['output_dir'])
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Enable debug mode if requested
+    debug_mode = args.debug
+    if debug_mode:
+        print("Debug mode enabled - verbose output will be shown")
+    
     # Setup model
     print("Setting up model...")
-    model, processor = setup_model(config)
+    try:
+        model, processor = setup_model(config)
+        print("✓ Model loaded successfully")
+    except Exception as e:
+        import traceback
+        print(f"✗ Failed to load model: {str(e)}")
+        print(f"Full error traceback:\n{traceback.format_exc()}")
+        return
     
     # Find audio files
     print(f"\nSearching for audio files in: {config['dataset']['data_dir']}")
@@ -285,6 +357,24 @@ def main():
         print("No audio files found! Please check the data_dir path.")
         return
     
+    # Test single file if requested
+    if args.test_single:
+        test_file = args.test_single
+        if not os.path.exists(test_file):
+            print(f"Test file not found: {test_file}")
+            return
+        
+        print(f"\nTesting transcription on: {test_file}")
+        try:
+            test_result = transcribe_audio(test_file, model, processor, config, debug=debug_mode)
+            print(f"✓ Test transcription successful: {test_result}")
+            return
+        except Exception as e:
+            import traceback
+            print(f"✗ Test transcription failed: {str(e)}")
+            print(f"Full error traceback:\n{traceback.format_exc()}")
+            return
+    
     # Transcribe all audio files
     results = []
     print(f"\nTranscribing {len(audio_files)} audio files...")
@@ -295,7 +385,8 @@ def main():
                 audio_info['audio_path'],
                 model,
                 processor,
-                config
+                config,
+                debug=debug_mode
             )
             
             result = {
@@ -308,14 +399,18 @@ def main():
             results.append(result)
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             print(f"\nError processing {audio_info['audio_path']}: {str(e)}")
+            print(f"Full error traceback:\n{error_details}")
             results.append({
                 'audio_path': audio_info['audio_path'],
                 'relative_path': audio_info['relative_path'],
                 'speaker': audio_info['speaker'],
                 'filename': audio_info['filename'],
                 'transcription': '',
-                'error': str(e)
+                'error': str(e),
+                'error_traceback': error_details
             })
     
     # Save results
