@@ -251,22 +251,22 @@ def transcribe_audio_official_method(audio_path: str, model, processor, config: 
     
     try:
         # Create messages in the official format
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "audio", "audio": audio_path},
-                {"type": "text", "text": prompt}
-            ]
-        }
-    ]
-    
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": audio_path},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
         if debug:
             print(f"    Messages formatted successfully")
         
         # Apply chat template (official method)
-    text = processor.apply_chat_template(
-        messages, 
+        text = processor.apply_chat_template(
+            messages, 
             add_generation_prompt=True, 
             tokenize=False
         )
@@ -373,7 +373,7 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
     # Skip device movement for official method, do it for fallback only
     if not hasattr(inputs, 'input_ids') or inputs.get('input_ids') is None or inputs['input_ids'].device.type == 'cpu':
         # This is likely the fallback method, so move to device manually
-    device = config['model']['device']
+        device = config['model']['device']
         try:
             # Move all tensor inputs to device
             for key, value in inputs.items():
@@ -444,9 +444,9 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         
         try:
             # Fallback: Try simpler generation parameters
-    with torch.no_grad():
-        generated_ids = model.generate(
-            **inputs,
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    **inputs,
                     max_new_tokens=512,
                     do_sample=False,
                     pad_token_id=processor.tokenizer.eos_token_id
@@ -555,8 +555,8 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
                     
                     full_response = processor.batch_decode(
                         full_sequences,
-                        skip_special_tokens=True,
-                        clean_up_tokenization_spaces=False
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False
                     )[0].strip()
                     
                     if full_response:
@@ -642,7 +642,7 @@ def main():
     # Setup model
     print("Setting up model...")
     try:
-    model, processor = setup_model(config)
+        model, processor = setup_model(config)
         print("✓ Model loaded successfully")
     except Exception as e:
         import traceback
