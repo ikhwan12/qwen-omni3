@@ -251,22 +251,22 @@ def transcribe_audio_official_method(audio_path: str, model, processor, config: 
     
     try:
         # Create messages in the official format
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "audio", "audio": audio_path},
-                    {"type": "text", "text": prompt}
-                ]
-            }
-        ]
-        
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "audio", "audio": audio_path},
+                {"type": "text", "text": prompt}
+            ]
+        }
+    ]
+    
         if debug:
             print(f"    Messages formatted successfully")
         
         # Apply chat template (official method)
-        text = processor.apply_chat_template(
-            messages, 
+    text = processor.apply_chat_template(
+        messages, 
             add_generation_prompt=True, 
             tokenize=False
         )
@@ -350,17 +350,17 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
             text_messages = [{"role": "user", "content": prompt}]
             text_input = processor.apply_chat_template(
                 text_messages, 
-                tokenize=False, 
-                add_generation_prompt=True
-            )
-            
+        tokenize=False, 
+        add_generation_prompt=True
+    )
+    
             # Simple tokenization
             inputs = processor.tokenizer(
                 text_input,
-                return_tensors="pt",
-                padding=True
-            )
-            
+        return_tensors="pt",
+        padding=True
+    )
+    
             if debug:
                 print(f"    Fallback approach successful (text-only)")
             
@@ -373,7 +373,7 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
     # Skip device movement for official method, do it for fallback only
     if not hasattr(inputs, 'input_ids') or inputs.get('input_ids') is None or inputs['input_ids'].device.type == 'cpu':
         # This is likely the fallback method, so move to device manually
-        device = config['model']['device']
+    device = config['model']['device']
         try:
             # Move all tensor inputs to device
             for key, value in inputs.items():
@@ -444,9 +444,9 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         
         try:
             # Fallback: Try simpler generation parameters
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **inputs,
+    with torch.no_grad():
+        generated_ids = model.generate(
+            **inputs,
                     max_new_tokens=512,
                     do_sample=False,
                     pad_token_id=processor.tokenizer.eos_token_id
@@ -497,15 +497,22 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         
         if debug:
             print(f"    Input length to trim: {input_length}")
-            print(f"    Generated IDs shape before trimming: {generated_ids.shape}")
+            if hasattr(generated_ids, 'sequences'):
+                print(f"    Generated IDs sequences shape: {generated_ids.sequences.shape}")
+            else:
+                print(f"    Generated IDs shape: {generated_ids.shape}")
         
         # Use official decoding method: processor.batch_decode(text_ids.sequences[:, inputs["input_ids"].shape[1] :], ...)
         if hasattr(generated_ids, 'sequences'):
             # If it's a generation output object, use sequences attribute
             sequences_to_decode = generated_ids.sequences[:, input_length:]
+            if debug:
+                print(f"    Using sequences attribute from GenerateDecoderOnlyOutput")
         else:
             # If it's already a tensor, use it directly
             sequences_to_decode = generated_ids[:, input_length:]
+            if debug:
+                print(f"    Using tensor directly")
         
         if debug:
             print(f"    Sequences to decode shape: {sequences_to_decode.shape}")
@@ -541,7 +548,11 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
                 
                 # Try decoding the full sequence as fallback
                 try:
-                    full_sequences = generated_ids if not hasattr(generated_ids, 'sequences') else generated_ids.sequences
+                    if hasattr(generated_ids, 'sequences'):
+                        full_sequences = generated_ids.sequences
+                    else:
+                        full_sequences = generated_ids
+                    
                     full_response = processor.batch_decode(
                         full_sequences,
                         skip_special_tokens=True,
@@ -631,7 +642,7 @@ def main():
     # Setup model
     print("Setting up model...")
     try:
-        model, processor = setup_model(config)
+    model, processor = setup_model(config)
         print("✓ Model loaded successfully")
     except Exception as e:
         import traceback
@@ -669,7 +680,7 @@ def main():
             import traceback
             print(f"✗ Test transcription failed: {str(e)}")
             print(f"Full error traceback:\n{traceback.format_exc()}")
-            return
+        return
     
     # Transcribe all audio files
     results = []
