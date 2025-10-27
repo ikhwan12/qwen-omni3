@@ -9,13 +9,21 @@ model:
   name: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
   device: "cuda"  # Options: "cuda", "cpu" (use "cuda" for GPU, "cpu" for CPU-only)
   torch_dtype: "bfloat16"  # Options: "bfloat16", "float16", "float32"
+  # Quantization settings (reduces memory usage)
+  quantization:
+    enabled: true  # Set to true to enable 4-bit quantization
+    load_in_4bit: true  # Use 4-bit quantization (recommended)
+    load_in_8bit: false  # Use 8-bit quantization (alternative, higher quality but more memory)
+    bnb_4bit_compute_dtype: "bfloat16"  # Compute dtype for 4-bit quantization
+    bnb_4bit_use_double_quant: true  # Use double quantization (saves more memory)
+    bnb_4bit_quant_type: "nf4"  # Quantization type: "nf4" (recommended) or "fp4"
   # Note: Run 'python scripts/check_cuda.py' to verify CUDA is available
-  # WARNING: Qwen3-Omni-30B requires 48GB+ VRAM (you have Quadro RTX 8000 48GB ✓)
+  # WARNING: Qwen3-Omni-30B requires 48GB+ VRAM, but with 4-bit quantization ~12-15GB
 
 # Dataset Configuration
 dataset:
   # Path to L2-ARCTIC dataset
-  data_dir: "E:/Dataset/LNV/L2-ARCTIC/l2arctic_release_v5.0"
+  data_dir: "datasets"
   # Output directory for transcriptions
   output_dir: "./outputs"
   # Language for transcription

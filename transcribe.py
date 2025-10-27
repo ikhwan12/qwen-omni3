@@ -16,6 +16,13 @@ except ImportError:
     from transformers import AutoProcessor as Qwen3OmniMoeProcessor
     QWEN3_AVAILABLE = False
     print("Warning: Qwen3-Omni not available in transformers. Please run: update_transformers.bat")
+
+try:
+    from transformers import BitsAndBytesConfig
+    QUANTIZATION_AVAILABLE = True
+except ImportError:
+    BitsAndBytesConfig = None
+    QUANTIZATION_AVAILABLE = False
 from tqdm import tqdm
 import soundfile as sf
 
@@ -41,8 +48,20 @@ def setup_model(config: Dict):
     }
     torch_dtype = dtype_map.get(dtype_str, torch.bfloat16)
     
+    # Check quantization settings
+    quantization_config = config['model'].get('quantization', {})
+    quantization_enabled = quantization_config.get('enabled', False)
+    
     print(f"Loading model: {model_name}")
     print(f"Device: {device}, Dtype: {dtype_str}")
+    
+    if quantization_enabled:
+        print("Quantization enabled:")
+        if quantization_config.get('load_in_4bit', False):
+            print("  - 4-bit quantization")
+        elif quantization_config.get('load_in_8bit', False):
+            print("  - 8-bit quantization")
+        print(f"  - Quantization type: {quantization_config.get('bnb_4bit_quant_type', 'nf4')}")
     
     if not QWEN3_AVAILABLE:
         print("\n" + "="*70)
@@ -53,18 +72,50 @@ def setup_model(config: Dict):
         print("="*70)
         raise ImportError("Qwen3-Omni not available. Run update_transformers.bat")
     
+    # Setup quantization config if enabled
+    bnb_config = None
+    if quantization_enabled and QUANTIZATION_AVAILABLE:
+        print("Setting up BitsAndBytes quantization...")
+        
+        # Get compute dtype for quantization
+        compute_dtype_str = quantization_config.get('bnb_4bit_compute_dtype', dtype_str)
+        compute_dtype = dtype_map.get(compute_dtype_str, torch_dtype)
+        
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=quantization_config.get('load_in_4bit', True),
+            load_in_8bit=quantization_config.get('load_in_8bit', False),
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_use_double_quant=quantization_config.get('bnb_4bit_use_double_quant', True),
+            bnb_4bit_quant_type=quantization_config.get('bnb_4bit_quant_type', 'nf4')
+        )
+    elif quantization_enabled and not QUANTIZATION_AVAILABLE:
+        print("Warning: Quantization enabled but bitsandbytes not available. Install with: pip install bitsandbytes")
+        print("Proceeding without quantization...")
+    
     processor = Qwen3OmniMoeProcessor.from_pretrained(
         model_name,
         trust_remote_code=True
     )
     
+    # Prepare model loading arguments
+    model_kwargs = {
+        'trust_remote_code': True
+    }
+    
+    # Add quantization config if available
+    if bnb_config is not None:
+        model_kwargs['quantization_config'] = bnb_config
+        # When using quantization, let transformers handle device placement
+        model_kwargs['device_map'] = 'auto'
+    else:
+        model_kwargs['torch_dtype'] = torch_dtype
+        model_kwargs['device_map'] = device
+    
     # Use Qwen3OmniMoeForConditionalGeneration for Qwen3-Omni-30B-A3B-Instruct
     # Requires transformers from GitHub: pip install git+https://github.com/huggingface/transformers
     model = Qwen3OmniMoeForConditionalGeneration.from_pretrained(
         model_name,
-        torch_dtype=torch_dtype,
-        device_map=device,
-        trust_remote_code=True
+        **model_kwargs
     )
     
     return model, processor

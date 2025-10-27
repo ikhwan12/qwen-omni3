@@ -74,7 +74,7 @@ fi
 
 echo
 echo "Installing other dependencies..."
-pip install transformers accelerate qwen-omni-utils werpy tqdm pyyaml soundfile librosa pandas numpy
+pip install transformers accelerate qwen-omni-utils werpy tqdm pyyaml soundfile librosa pandas numpy bitsandbytes
 
 echo
 echo "Installing FlashAttention 2 (optional but recommended)..."

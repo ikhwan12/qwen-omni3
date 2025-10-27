@@ -117,3 +117,5 @@ source ../.venv/bin/activate
 - GPU detection is automatic - CPU fallback is available
 - CUDA versions supported: 12.1, 12.9 (latest), 11.8 (legacy), or CPU-only
 - Requirements files available: `requirements-cuda.txt` (12.1), `requirements-cuda129.txt` (12.9), `requirements-cuda118.txt` (11.8)
+- Model quantization supported: 4-bit and 8-bit quantization using BitsAndBytes (reduces memory usage by ~75%)
+- Quantization settings can be configured in `config.yaml` under `model.quantization`
