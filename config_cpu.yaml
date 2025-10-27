@@ -1,0 +1,42 @@
+# Configuration for Qwen3-Omni Transcription (CPU ONLY)
+# Use this when GPU memory is exhausted
+
+# Model Configuration
+model:
+  # Model name from Hugging Face or local path
+  name: "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+  device: "cpu"  # Use CPU instead of GPU
+  torch_dtype: "float32"  # Use float32 for CPU
+  # Quantization DISABLED for CPU
+  quantization:
+    enabled: false
+    load_in_4bit: false
+    load_in_8bit: false
+
+# Dataset Configuration
+dataset:
+  # Path to L2-ARCTIC dataset
+  data_dir: "datasets"
+  # Output directory for transcriptions
+  output_dir: "./outputs"
+  # Language for transcription
+  language: "english"
+  # Dataset structure for L2-ARCTIC v5.0
+  wav_subdir: "wav"
+  transcript_subdir: "transcript"
+  
+# Transcription Configuration
+transcription:
+  # Batch size for processing
+  batch_size: 1
+  # Audio preprocessing
+  target_sample_rate: 16000
+
+# Evaluation Configuration
+evaluation:
+  # Whether to normalize text before WER calculation
+  normalize_text: true
+  # Whether to remove punctuation
+  remove_punctuation: true
+  # Whether to convert to lowercase
+  lowercase: true
