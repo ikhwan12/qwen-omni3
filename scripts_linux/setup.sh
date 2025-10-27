@@ -42,10 +42,11 @@ if command -v nvidia-smi &> /dev/null; then
     echo
     echo "Select PyTorch version:"
     echo "  1. CUDA 12.1 (RTX 30xx/40xx, newer GPUs) - RECOMMENDED"
-    echo "  2. CUDA 11.8 (older GPUs)"
-    echo "  3. CPU only (no GPU)"
+    echo "  2. CUDA 12.9 (latest GPUs, RTX 50xx series)"
+    echo "  3. CUDA 11.8 (older GPUs)"
+    echo "  4. CPU only (no GPU)"
     echo
-    read -p "Enter choice (1-3, default=1): " cuda_choice
+    read -p "Enter choice (1-4, default=1): " cuda_choice
     cuda_choice=${cuda_choice:-1}
 
     case $cuda_choice in
@@ -54,6 +55,10 @@ if command -v nvidia-smi &> /dev/null; then
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
             ;;
         2)
+            echo "Installing PyTorch with CUDA 12.9..."
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129
+            ;;
+        3)
             echo "Installing PyTorch with CUDA 11.8..."
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
             ;;

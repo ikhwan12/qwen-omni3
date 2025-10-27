@@ -46,7 +46,7 @@ This folder contains bash scripts for Linux/Unix systems (including WSL on Windo
 
 ### `setup.sh`
 - Creates virtual environment
-- Detects NVIDIA GPU and installs appropriate PyTorch version
+- Detects NVIDIA GPU and installs appropriate PyTorch version (supports CUDA 12.1, 12.9, 11.8, or CPU)
 - Installs all required dependencies
 - Sets up FlashAttention 2
 
@@ -115,3 +115,5 @@ source ../.venv/bin/activate
 - Model cache is set to `$HOME/huggingface_cache` to avoid system drive issues
 - All scripts include error handling and will exit on failure
 - GPU detection is automatic - CPU fallback is available
+- CUDA versions supported: 12.1, 12.9 (latest), 11.8 (legacy), or CPU-only
+- Requirements files available: `requirements-cuda.txt` (12.1), `requirements-cuda129.txt` (12.9), `requirements-cuda118.txt` (11.8)

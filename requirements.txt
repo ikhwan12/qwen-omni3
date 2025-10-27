@@ -1,6 +1,8 @@
 # PyTorch with CUDA support
 # For CUDA 12.1 (recommended for RTX 30xx/40xx)
 # Install with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# For CUDA 12.9 (latest GPUs, RTX 50xx series)
+# Install with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129
 # For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 # For CPU only: pip install torch torchvision torchaudio
 torch>=2.0.0
