@@ -25,6 +25,8 @@ except ImportError:
     QUANTIZATION_AVAILABLE = False
 from tqdm import tqdm
 import soundfile as sf
+import librosa
+import scipy.io.wavfile
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -155,6 +157,44 @@ def find_audio_files_l2arctic(data_dir: str, wav_subdir: str = "wav") -> List[Di
     return audio_files
 
 
+def validate_and_load_audio(audio_path: str, debug: bool = False):
+    """Validate and load audio file in the correct format for Qwen3-Omni"""
+    if debug:
+        print(f"    Validating audio: {audio_path}")
+    
+    # Check if file exists
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    
+    # Check file size
+    file_size = os.path.getsize(audio_path)
+    if file_size == 0:
+        raise ValueError(f"Audio file is empty: {audio_path}")
+    
+    if debug:
+        print(f"    Audio file size: {file_size} bytes")
+    
+    try:
+        # Load audio with librosa to ensure compatibility
+        audio_data, sample_rate = librosa.load(audio_path, sr=None)
+        
+        if debug:
+            print(f"    Audio loaded: {len(audio_data)} samples, {sample_rate}Hz")
+        
+        # Check if audio data is valid
+        if len(audio_data) == 0:
+            raise ValueError(f"Audio file contains no data: {audio_path}")
+        
+        # Ensure minimum duration (at least 0.1 seconds)
+        if len(audio_data) / sample_rate < 0.1:
+            raise ValueError(f"Audio file too short: {audio_path}")
+        
+        return audio_data, sample_rate
+        
+    except Exception as e:
+        raise ValueError(f"Failed to load audio file {audio_path}: {str(e)}")
+
+
 def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: bool = False) -> str:
     """Transcribe a single audio file"""
     if debug:
@@ -171,66 +211,132 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
     
     if debug:
         print(f"    Language: {language}, Prompt: {prompt}")
-        
-    # Check if audio file exists and is readable
-    if not os.path.exists(audio_path):
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
     
-    if debug:
-        print(f"    Audio file exists: {os.path.getsize(audio_path)} bytes")
-    
-    # Prepare message in Qwen3-Omni format (audio first, then text)
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "audio", "audio": audio_path},
-                {"type": "text", "text": prompt}
-            ]
-        }
-    ]
-    
-    if debug:
-        print(f"    Prepared messages with audio and text")
-    
-    # Process messages
+    # Validate and load audio first to catch issues early
     try:
+        audio_data, sample_rate = validate_and_load_audio(audio_path, debug)
+    except Exception as e:
+        if debug:
+            print(f"    Audio validation failed: {str(e)}")
+        raise
+    
+    # Try two different approaches to work around the processor bug
+    try:
+        # Approach 1: Use the original method with audio path
+        if debug:
+            print(f"    Trying approach 1: direct audio path")
+        
+        # Prepare message in Qwen3-Omni format (audio first, then text)
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": audio_path},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+        
+        # Process messages
         text = processor.apply_chat_template(
             messages, 
             tokenize=False, 
             add_generation_prompt=True
         )
-        if debug:
-            print(f"    Applied chat template successfully")
-    except Exception as e:
-        if debug:
-            print(f"    Failed to apply chat template: {str(e)}")
-        raise
-    
-    audios = []
-    for message in messages:
-        if isinstance(message["content"], list):
-            for ele in message["content"]:
-                if ele["type"] == "audio":
-                    audios.append(ele["audio"])
-    
-    if debug:
-        print(f"    Found {len(audios)} audio files to process")
-    
-    # Prepare inputs
-    try:
+        
+        audios = []
+        for message in messages:
+            if isinstance(message["content"], list):
+                for ele in message["content"]:
+                    if ele["type"] == "audio":
+                        audios.append(ele["audio"])
+        
+        # Try to process with validation
+        if not audios:
+            raise ValueError("No audio found in messages")
+        
+        # Prepare inputs
         inputs = processor(
             text=[text],
             audios=audios,
             return_tensors="pt",
             padding=True
         )
+        
         if debug:
-            print(f"    Processor inputs prepared successfully")
-    except Exception as e:
+            print(f"    Approach 1 successful")
+            
+    except (StopIteration, ValueError) as e:
         if debug:
-            print(f"    Failed to prepare inputs: {str(e)}")
-        raise
+            print(f"    Approach 1 failed: {str(e)}, trying approach 2")
+        
+        # Approach 2: Use pre-loaded audio data
+        try:
+            # Create a temporary file or use the loaded audio data directly
+            import tempfile
+            
+            # Save audio to a temporary file with standard format
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                # Ensure 16kHz sample rate for consistency
+                if sample_rate != 16000:
+                    audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+                    sample_rate = 16000
+                
+                # Convert to int16 format
+                audio_int16 = (audio_data * 32767).astype('int16')
+                
+                # Write to temporary file
+                scipy.io.wavfile.write(tmp_file.name, sample_rate, audio_int16)
+                tmp_audio_path = tmp_file.name
+            
+            if debug:
+                print(f"    Created temp audio file: {tmp_audio_path}")
+            
+            # Try processing with the standardized audio
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "audio", "audio": tmp_audio_path},
+                        {"type": "text", "text": prompt}
+                    ]
+                }
+            ]
+            
+            text = processor.apply_chat_template(
+                messages, 
+                tokenize=False, 
+                add_generation_prompt=True
+            )
+            
+            audios = [tmp_audio_path]
+            
+            inputs = processor(
+                text=[text],
+                audios=audios,
+                return_tensors="pt",
+                padding=True
+            )
+            
+            # Clean up temporary file
+            os.unlink(tmp_audio_path)
+            
+            if debug:
+                print(f"    Approach 2 successful")
+                
+        except Exception as e2:
+            # Clean up temporary file if it exists
+            try:
+                if 'tmp_audio_path' in locals():
+                    os.unlink(tmp_audio_path)
+            except:
+                pass
+            
+            if debug:
+                print(f"    Approach 2 also failed: {str(e2)}")
+            
+            # Re-raise the original error
+            raise e
     
     # Move to device
     device = config['model']['device']
