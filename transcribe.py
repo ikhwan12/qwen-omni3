@@ -263,10 +263,13 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         
         # Create text input manually (without audio in the messages)
         # This bypasses the problematic audio processing in the processor
+        # Use a more specific prompt that indicates we're doing audio transcription
+        transcription_prompt = f"I have an audio file that needs to be transcribed. {prompt} Please provide the transcription:"
+        
         text_messages = [
             {
                 "role": "user", 
-                "content": prompt
+                "content": transcription_prompt
             }
         ]
         
@@ -391,7 +394,13 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
             
             if debug:
                 print(f"    Model generation completed")
+                # Handle case where model.generate() returns a tuple
+                if isinstance(generated_ids, tuple):
+                    generated_ids = generated_ids[0]
+                    if debug:
+                        print(f"    Extracted tensor from tuple")
                 print(f"    Generated IDs shape: {generated_ids.shape}")
+                print(f"    Generated IDs type: {type(generated_ids)}")
                 
     except Exception as e:
         if debug:
@@ -419,6 +428,12 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
             
             if debug:
                 print(f"    Simplified generation successful")
+                # Handle tuple case for simplified generation too
+                if isinstance(generated_ids, tuple):
+                    generated_ids = generated_ids[0]
+                    if debug:
+                        print(f"    Extracted tensor from tuple (simplified)")
+                print(f"    Generated IDs shape (simplified): {generated_ids.shape}")
                 
         except Exception as e2:
             if debug:
@@ -432,13 +447,20 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         else:
             input_length = 0
         
-        # Trim the input tokens from generated output
-        generated_ids_trimmed = [
-            out_ids[input_length:] for out_ids in generated_ids
-        ]
-        
         if debug:
-            print(f"    Trimmed {input_length} input tokens")
+            print(f"    Input length to trim: {input_length}")
+            print(f"    Generated IDs shape before trimming: {generated_ids.shape}")
+        
+        # Trim the input tokens from generated output
+        if input_length > 0 and generated_ids.shape[1] > input_length:
+            generated_ids_trimmed = generated_ids[:, input_length:]
+            if debug:
+                print(f"    Trimmed {input_length} input tokens")
+                print(f"    Generated IDs shape after trimming: {generated_ids_trimmed.shape}")
+        else:
+            generated_ids_trimmed = generated_ids
+            if debug:
+                print(f"    No trimming needed or safe to do")
             
     except Exception as e:
         if debug:
@@ -451,6 +473,13 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
             decoder = processor.batch_decode
         else:
             decoder = processor.tokenizer.batch_decode
+        
+        if debug:
+            print(f"    Decoding with shape: {generated_ids_trimmed.shape}")
+            # Show some token IDs for debugging
+            if generated_ids_trimmed.shape[1] > 0:
+                sample_tokens = generated_ids_trimmed[0][:min(10, generated_ids_trimmed.shape[1])]
+                print(f"    Sample token IDs: {sample_tokens.tolist()}")
             
         output_text = decoder(
             generated_ids_trimmed,
@@ -460,17 +489,40 @@ def transcribe_audio(audio_path: str, model, processor, config: Dict, debug: boo
         
         if debug:
             print(f"    Decoded output: {len(output_text)} items")
+            for i, text in enumerate(output_text):
+                print(f"    Output {i}: '{text}'")
             
         # Return the first result, handling empty results
         if output_text and len(output_text) > 0:
             result = output_text[0].strip()
             if debug:
-                print(f"    Final result: '{result[:100]}{'...' if len(result) > 100 else ''}'")
-            return result
+                print(f"    Final result length: {len(result)}")
+                if len(result) > 0:
+                    print(f"    Final result: '{result[:200]}{'...' if len(result) > 200 else ''}'")
+                else:
+                    print(f"    Final result is empty - trying alternative decoding")
+                    
+                    # Try decoding the full generated sequence if trimmed version is empty
+                    if generated_ids.shape[1] > 0:
+                        full_output = decoder(
+                            generated_ids,
+                            skip_special_tokens=True,
+                            clean_up_tokenization_spaces=False
+                        )
+                        if debug:
+                            print(f"    Full output (untrimmed): '{full_output[0]}'")
+                        
+                        # If full output has content, use it
+                        if full_output and full_output[0].strip():
+                            result = full_output[0].strip()
+                            if debug:
+                                print(f"    Using full output: '{result[:200]}{'...' if len(result) > 200 else ''}'")
+            
+            return result if result else "No transcription generated"
         else:
             if debug:
                 print(f"    No output text generated")
-            return ""
+            return "No output from decoder"
             
     except Exception as e:
         if debug:
