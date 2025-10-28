@@ -10,8 +10,51 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
-from werpy import wer, cer
+from werpy import wer
 from tqdm import tqdm
+
+
+def cer(reference: str, hypothesis: str) -> float:
+    """
+    Calculate Character Error Rate (CER) between reference and hypothesis.
+    CER = (Substitutions + Insertions + Deletions) / (Number of reference characters)
+    """
+    if not reference:
+        return 1.0 if hypothesis else 0.0
+    
+    # Convert to lists of characters
+    ref_chars = list(reference)
+    hyp_chars = list(hypothesis)
+    
+    # Use dynamic programming to compute Levenshtein distance
+    m, n = len(ref_chars), len(hyp_chars)
+    
+    # Create DP table
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    
+    # Initialize base cases
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+    
+    # Fill the DP table
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if ref_chars[i - 1] == hyp_chars[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = min(
+                    dp[i - 1][j] + 1,      # Deletion
+                    dp[i][j - 1] + 1,      # Insertion
+                    dp[i - 1][j - 1] + 1   # Substitution
+                )
+    
+    # CER = edit distance / number of reference characters
+    edit_distance = dp[m][n]
+    cer_score = edit_distance / len(ref_chars)
+    
+    return cer_score
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
