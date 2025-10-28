@@ -10,51 +10,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
-from werpy import wer
 from tqdm import tqdm
-
-
-def cer(reference: str, hypothesis: str) -> float:
-    """
-    Calculate Character Error Rate (CER) between reference and hypothesis.
-    CER = (Substitutions + Insertions + Deletions) / (Number of reference characters)
-    """
-    if not reference:
-        return 1.0 if hypothesis else 0.0
-    
-    # Convert to lists of characters
-    ref_chars = list(reference)
-    hyp_chars = list(hypothesis)
-    
-    # Use dynamic programming to compute Levenshtein distance
-    m, n = len(ref_chars), len(hyp_chars)
-    
-    # Create DP table
-    dp = [[0] * (n + 1) for _ in range(m + 1)]
-    
-    # Initialize base cases
-    for i in range(m + 1):
-        dp[i][0] = i
-    for j in range(n + 1):
-        dp[0][j] = j
-    
-    # Fill the DP table
-    for i in range(1, m + 1):
-        for j in range(1, n + 1):
-            if ref_chars[i - 1] == hyp_chars[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1]
-            else:
-                dp[i][j] = min(
-                    dp[i - 1][j] + 1,      # Deletion
-                    dp[i][j - 1] + 1,      # Insertion
-                    dp[i - 1][j - 1] + 1   # Substitution
-                )
-    
-    # CER = edit distance / number of reference characters
-    edit_distance = dp[m][n]
-    cer_score = edit_distance / len(ref_chars)
-    
-    return cer_score
+from werpy import wer
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -153,30 +110,25 @@ def match_transcription_to_reference(
     return matched_pairs
 
 
-def calculate_metrics_werpy(
+def calculate_metrics(
     hypothesis: str,
     reference: str
 ) -> Dict[str, float]:
-    """Calculate WER and CER metrics using werpy"""
+    """Calculate WER metric using werpy"""
     try:
-        # werpy expects lists of words for WER
+        # Split into words
         hyp_words = hypothesis.split()
         ref_words = reference.split()
         
-        # Calculate WER (word error rate)
+        # Calculate WER using werpy (expects lists of words)
         wer_score = wer(ref_words, hyp_words)
-        
-        # Calculate CER (character error rate)
-        cer_score = cer(reference, hypothesis)
         
     except Exception as e:
         print(f"Error calculating metrics: {e}")
         wer_score = 1.0
-        cer_score = 1.0
     
     return {
-        'wer': wer_score * 100,  # Convert to percentage
-        'cer': cer_score * 100
+        'wer': wer_score * 100  # Convert to percentage
     }
 
 
@@ -219,8 +171,6 @@ def evaluate_wer(
     detailed_results = []
     all_hypotheses_words = []
     all_references_words = []
-    all_hypotheses_chars = []
-    all_references_chars = []
     
     print("\nCalculating WER metrics...")
     print("Normalizing both hypothesis (test) and ground truth (reference)...")
@@ -231,7 +181,7 @@ def evaluate_wer(
         norm_reference = normalize_text(reference, config)
         
         # Calculate metrics for this pair
-        metrics = calculate_metrics_werpy(norm_hypothesis, norm_reference)
+        metrics = calculate_metrics(norm_hypothesis, norm_reference)
         
         detailed_results.append({
             'audio_path': audio_path,
@@ -241,22 +191,16 @@ def evaluate_wer(
             'reference_original': reference,
             'hypothesis_normalized': norm_hypothesis,
             'reference_normalized': norm_reference,
-            'wer': metrics['wer'],
-            'cer': metrics['cer']
+            'wer': metrics['wer']
         })
         
         # Collect for overall metrics
         all_hypotheses_words.extend(norm_hypothesis.split())
         all_references_words.extend(norm_reference.split())
-        all_hypotheses_chars.append(norm_hypothesis)
-        all_references_chars.append(norm_reference)
     
     # Calculate overall metrics
     print("\nCalculating overall metrics...")
     overall_wer = wer(all_references_words, all_hypotheses_words) * 100
-    
-    # For CER, concatenate all texts
-    overall_cer = cer(''.join(all_references_chars), ''.join(all_hypotheses_chars)) * 100
     
     # Calculate per-speaker metrics
     df = pd.DataFrame(detailed_results)
@@ -265,32 +209,25 @@ def evaluate_wer(
     for speaker in df['speaker'].unique():
         speaker_df = df[df['speaker'] == speaker]
         
-        # Collect all words and chars for this speaker
+        # Collect all words for this speaker
         speaker_hyp_words = []
         speaker_ref_words = []
-        speaker_hyp_chars = []
-        speaker_ref_chars = []
         
         for _, row in speaker_df.iterrows():
             speaker_hyp_words.extend(row['hypothesis_normalized'].split())
             speaker_ref_words.extend(row['reference_normalized'].split())
-            speaker_hyp_chars.append(row['hypothesis_normalized'])
-            speaker_ref_chars.append(row['reference_normalized'])
         
         # Calculate speaker-level metrics
         speaker_wer = wer(speaker_ref_words, speaker_hyp_words) * 100
-        speaker_cer = cer(''.join(speaker_ref_chars), ''.join(speaker_hyp_chars)) * 100
         
         speaker_metrics[speaker] = {
             'wer': speaker_wer,
-            'cer': speaker_cer,
             'count': len(speaker_df)
         }
     
     results = {
         'overall': {
             'wer': overall_wer,
-            'cer': overall_cer,
             'num_samples': len(matched_pairs)
         },
         'per_speaker': speaker_metrics,
@@ -319,13 +256,12 @@ def print_results(results: Dict):
     overall = results['overall']
     print(f"\nOverall Metrics (n={overall['num_samples']}):")
     print(f"  Word Error Rate (WER): {overall['wer']:.2f}%")
-    print(f"  Character Error Rate (CER): {overall['cer']:.2f}%")
     
     if results['per_speaker']:
         print("\n" + "-"*70)
         print("Per-Speaker Results:")
         print("-"*70)
-        print(f"{'Speaker':<15} {'WER (%)':<12} {'CER (%)':<12} {'Samples':<10}")
+        print(f"{'Speaker':<15} {'WER (%)':<12} {'Samples':<10}")
         print("-"*70)
         
         # Sort by WER
@@ -335,14 +271,13 @@ def print_results(results: Dict):
         )
         
         for speaker, metrics in sorted_speakers:
-            print(f"{speaker:<15} {metrics['wer']:>10.2f}  {metrics['cer']:>10.2f}  {metrics['count']:>9}")
+            print(f"{speaker:<15} {metrics['wer']:>10.2f}  {metrics['count']:>9}")
         
         print("-"*70)
         
         # Calculate average WER across speakers
         avg_wer = sum(m['wer'] for m in results['per_speaker'].values()) / len(results['per_speaker'])
-        avg_cer = sum(m['cer'] for m in results['per_speaker'].values()) / len(results['per_speaker'])
-        print(f"{'Average':<15} {avg_wer:>10.2f}  {avg_cer:>10.2f}")
+        print(f"{'Average':<15} {avg_wer:>10.2f}")
     
     print("\n" + "="*70)
 
