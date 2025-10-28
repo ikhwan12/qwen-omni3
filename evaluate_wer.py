@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import pandas as pd
 from tqdm import tqdm
-from werpy import wer
+from werpy import wer, normalize
 
 
 def load_config(config_path: str = "config.yaml") -> Dict:
@@ -23,23 +23,14 @@ def load_config(config_path: str = "config.yaml") -> Dict:
 
 def normalize_text(text: str, config: Dict) -> str:
     """
-    Normalize text for WER evaluation
+    Normalize text for WER evaluation using werpy's normalize
     Applies to both hypothesis (test) and ground truth (reference)
     """
     if not config['evaluation']['normalize_text']:
         return text
     
-    # Convert to lowercase
-    if config['evaluation']['lowercase']:
-        text = text.lower()
-    
-    # Remove punctuation
-    if config['evaluation']['remove_punctuation']:
-        # Remove all punctuation and special characters
-        text = re.sub(r'[^\w\s]', '', text)
-    
-    # Remove extra whitespace and normalize spaces
-    text = ' '.join(text.split())
+    # Use werpy's normalize function
+    text = normalize(text)
     
     return text.strip()
 
@@ -116,12 +107,8 @@ def calculate_metrics(
 ) -> Dict[str, float]:
     """Calculate WER metric using werpy"""
     try:
-        # Split into words
-        hyp_words = hypothesis.split()
-        ref_words = reference.split()
-        
-        # Calculate WER using werpy (expects batch format: list of lists)
-        wer_score = wer([ref_words], [hyp_words])
+        # werpy.wer expects normalized strings, not word lists
+        wer_score = wer(reference, hypothesis)
         
     except Exception as e:
         print(f"Error calculating metrics: {e}")
@@ -169,8 +156,8 @@ def evaluate_wer(
     
     # Calculate metrics for each pair
     detailed_results = []
-    all_hypotheses_words = []
-    all_references_words = []
+    all_hypotheses_texts = []
+    all_references_texts = []
     
     print("\nCalculating WER metrics...")
     print("Normalizing both hypothesis (test) and ground truth (reference)...")
@@ -195,12 +182,15 @@ def evaluate_wer(
         })
         
         # Collect for overall metrics
-        all_hypotheses_words.extend(norm_hypothesis.split())
-        all_references_words.extend(norm_reference.split())
+        all_hypotheses_texts.append(norm_hypothesis)
+        all_references_texts.append(norm_reference)
     
     # Calculate overall metrics
     print("\nCalculating overall metrics...")
-    overall_wer = wer([all_references_words], [all_hypotheses_words]) * 100
+    # werpy.wer expects strings, so join all transcriptions
+    combined_ref = ' '.join(all_references_texts)
+    combined_hyp = ' '.join(all_hypotheses_texts)
+    overall_wer = wer(combined_ref, combined_hyp) * 100
     
     # Calculate per-speaker metrics
     df = pd.DataFrame(detailed_results)
@@ -209,16 +199,19 @@ def evaluate_wer(
     for speaker in df['speaker'].unique():
         speaker_df = df[df['speaker'] == speaker]
         
-        # Collect all words for this speaker
-        speaker_hyp_words = []
-        speaker_ref_words = []
+        # Collect all transcriptions for this speaker
+        speaker_hyp_texts = []
+        speaker_ref_texts = []
         
         for _, row in speaker_df.iterrows():
-            speaker_hyp_words.extend(row['hypothesis_normalized'].split())
-            speaker_ref_words.extend(row['reference_normalized'].split())
+            speaker_hyp_texts.append(row['hypothesis_normalized'])
+            speaker_ref_texts.append(row['reference_normalized'])
         
         # Calculate speaker-level metrics
-        speaker_wer = wer([speaker_ref_words], [speaker_hyp_words]) * 100
+        # werpy.wer expects strings, so join all transcriptions
+        combined_speaker_ref = ' '.join(speaker_ref_texts)
+        combined_speaker_hyp = ' '.join(speaker_hyp_texts)
+        speaker_wer = wer(combined_speaker_ref, combined_speaker_hyp) * 100
         
         speaker_metrics[speaker] = {
             'wer': speaker_wer,
