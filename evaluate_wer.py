@@ -120,8 +120,8 @@ def calculate_metrics(
         hyp_words = hypothesis.split()
         ref_words = reference.split()
         
-        # Calculate WER using werpy (expects lists of words)
-        wer_score = wer(ref_words, hyp_words)
+        # Calculate WER using werpy (expects batch format: list of lists)
+        wer_score = wer([ref_words], [hyp_words])
         
     except Exception as e:
         print(f"Error calculating metrics: {e}")
@@ -200,7 +200,7 @@ def evaluate_wer(
     
     # Calculate overall metrics
     print("\nCalculating overall metrics...")
-    overall_wer = wer(all_references_words, all_hypotheses_words) * 100
+    overall_wer = wer([all_references_words], [all_hypotheses_words]) * 100
     
     # Calculate per-speaker metrics
     df = pd.DataFrame(detailed_results)
@@ -218,7 +218,7 @@ def evaluate_wer(
             speaker_ref_words.extend(row['reference_normalized'].split())
         
         # Calculate speaker-level metrics
-        speaker_wer = wer(speaker_ref_words, speaker_hyp_words) * 100
+        speaker_wer = wer([speaker_ref_words], [speaker_hyp_words]) * 100
         
         speaker_metrics[speaker] = {
             'wer': speaker_wer,
